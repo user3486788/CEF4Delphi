@@ -88,11 +88,22 @@ begin
   // Need at least 2 parameters: inputuri and output.file
   if ParamCount < 2 then
   begin
-    Result.ErrorMsg := 'Usage: URLToPDFConsole.exe inputuri output.file [--resources-root=path] [--timeout=600]' + #13#10 +
+    Result.ErrorMsg := 'URLToPDFConsole - Enhanced console application for converting URLs/HTML/SVG to PDF/PNG' + #13#10 + #13#10 +
+                      'Usage: URLToPDFConsole.exe inputuri output.file [--resources-root=path] [--timeout=600]' + #13#10 + #13#10 +
+                      'Parameters:' + #13#10 +
+                      '  inputuri        URL (http/https) or local file path (HTML/SVG)' + #13#10 +
+                      '  output.file     Output file path (.pdf or .png extension determines format)' + #13#10 +
+                      '  --resources-root=path  Base directory for relative paths (default: resources)' + #13#10 +
+                      '  --timeout=600   Timeout in seconds (default: 600)' + #13#10 + #13#10 +
                       'Examples:' + #13#10 +
                       '  URLToPDFConsole.exe https://www.example.com output.pdf' + #13#10 +
                       '  URLToPDFConsole.exe index.html report.png --resources-root=./assets/' + #13#10 +
-                      '  URLToPDFConsole.exe chart.svg chart.pdf --timeout=120';
+                      '  URLToPDFConsole.exe chart.svg chart.pdf --timeout=120' + #13#10 + #13#10 +
+                      'Features:' + #13#10 +
+                      '  • Automatic content size detection for optimal output' + #13#10 +
+                      '  • Zero margins for PDF output' + #13#10 +
+                      '  • Support for dynamic/JavaScript-rendered content' + #13#10 +
+                      '  • Local file support with relative path resolution';
     Exit;
   end;
 
