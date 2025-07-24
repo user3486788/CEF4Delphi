@@ -12,6 +12,7 @@ uses
   {$ENDIF}
   uCEFChromium, uCEFTypes, uCEFInterfaces, uCEFConstants, uCEFBrowserBitmap, uCEFChromiumCore, uCEFMiscFunctions, uCEFPDFPrintOptions;
 
+// Import TOutputFormat from uEncapsulatedBrowser
 type
   TOutputFormat = (ofPNG, ofPDF);
 
@@ -108,6 +109,7 @@ const
   CEF_CLOSE_BROWSER_MSG     = WM_APP + 3;
   CEF_LOAD_PENDING_URL_MSG  = WM_APP + 4;
   CEF_UPDATEBROWSERSIZE_MSG = WM_APP + 5;
+  CEF_PENDINGRESIZE         = WM_APP + 6;
 
 constructor TCEFBrowserThread.Create(const aDefaultURL : ustring; aWidth, aHeight, aDelayMs : integer; const aScreenScale : single; aOutputFormat: TOutputFormat = ofPNG; const aOutputPath: ustring = '');
 begin
@@ -615,19 +617,44 @@ begin
       // Generate PDF with custom page size and zero margins
       if assigned(FBrowser) and FBrowser.Initialized then
       begin
-        // Configure PDF options with detected content size
-        FBrowser.PDFPrintOptions.PaperWidthMM := (FBrowserSize.cx / 96.0) * 25.4; // Convert pixels to mm
-        FBrowser.PDFPrintOptions.PaperHeightMM := (FBrowserSize.cy / 96.0) * 25.4;
-        FBrowser.PDFPrintOptions.MarginType := PDF_PRINT_MARGIN_CUSTOM;
-        FBrowser.PDFPrintOptions.MarginTopMM := 0;
-        FBrowser.PDFPrintOptions.MarginBottomMM := 0;
-        FBrowser.PDFPrintOptions.MarginLeftMM := 0;
-        FBrowser.PDFPrintOptions.MarginRightMM := 0;
-        FBrowser.PDFPrintOptions.PrintBackground := True;
-        FBrowser.PDFPrintOptions.PreferCSSPageSize := False;
-        
-        FBrowser.PrintToPDF(FOutputPath);
-        // PDF completion will be handled by Browser_OnPdfPrintFinished
+        try
+          // Configure PDF options with detected content size
+          FBrowser.PDFPrintOptions.PaperWidthMM := (FBrowserSize.cx / 96.0) * 25.4; // Convert pixels to mm
+          FBrowser.PDFPrintOptions.PaperHeightMM := (FBrowserSize.cy / 96.0) * 25.4;
+          FBrowser.PDFPrintOptions.MarginType := PDF_PRINT_MARGIN_CUSTOM;
+          FBrowser.PDFPrintOptions.MarginTopMM := 0;
+          FBrowser.PDFPrintOptions.MarginBottomMM := 0;
+          FBrowser.PDFPrintOptions.MarginLeftMM := 0;
+          FBrowser.PDFPrintOptions.MarginRightMM := 0;
+          FBrowser.PDFPrintOptions.PrintBackground := True;
+          FBrowser.PDFPrintOptions.PreferCSSPageSize := False;
+          
+          FBrowser.PrintToPDF(FOutputPath);
+          // PDF completion will be handled by Browser_OnPdfPrintFinished
+        except
+          on E: Exception do
+          begin
+            SetErrorText('PDF configuration error: ' + E.Message);
+            if assigned(FOnError) then
+            begin
+              if FSyncEvents then
+                Synchronize(DoOnError)
+              else
+                DoOnError;
+            end;
+          end;
+        end;
+      end
+      else
+      begin
+        SetErrorText('Browser not initialized for PDF generation');
+        if assigned(FOnError) then
+        begin
+          if FSyncEvents then
+            Synchronize(DoOnError)
+          else
+            DoOnError;
+        end;
       end;
     end
     else
@@ -716,22 +743,58 @@ var
 begin
   if assigned(FBrowser) and FBrowser.Initialized then
   begin
-    // JavaScript to detect content size and adjust browser viewport
+    // Enhanced JavaScript to detect content size with better accuracy
     JavaScriptCode := 
-      'var body = document.body,' +
-      'html = document.documentElement;' +
-      'var height = Math.max(body.scrollHeight, body.offsetHeight, html.clientHeight, html.scrollHeight, html.offsetHeight);' +
-      'var width = Math.max(body.scrollWidth, body.offsetWidth, html.clientWidth, html.scrollWidth, html.offsetWidth);' +
-      'console.log("Content size: " + width + "x" + height);' +
-      'if (window.chrome && window.chrome.webview) {' +
-      '  window.chrome.webview.postMessage({type: "contentSize", width: width, height: height});' +
-      '} else {' +
-      '  window.location.hash = "size_" + width + "_" + height;' +
-      '}';
+      '(function() {' +
+      '  function getContentSize() {' +
+      '    var body = document.body;' +
+      '    var html = document.documentElement;' +
+      '    ' +
+      '    // Get dimensions from various sources' +
+      '    var height = Math.max(' +
+      '      body.scrollHeight, body.offsetHeight,' +
+      '      html.clientHeight, html.scrollHeight, html.offsetHeight' +
+      '    );' +
+      '    var width = Math.max(' +
+      '      body.scrollWidth, body.offsetWidth,' +
+      '      html.clientWidth, html.scrollWidth, html.offsetWidth' +
+      '    );' +
+      '    ' +
+      '    // Minimum dimensions to prevent too small outputs' +
+      '    width = Math.max(width, 800);' +
+      '    height = Math.max(height, 600);' +
+      '    ' +
+      '    // Maximum dimensions to prevent excessive memory usage' +
+      '    width = Math.min(width, 3840);' +
+      '    height = Math.min(height, 2160);' +
+      '    ' +
+      '    console.log("Detected content size: " + width + "x" + height);' +
+      '    return {width: width, height: height};' +
+      '  }' +
+      '  ' +
+      '  // Wait for any pending operations' +
+      '  setTimeout(function() {' +
+      '    var size = getContentSize();' +
+      '    console.log("Final content size: " + size.width + "x" + size.height);' +
+      '  }, 100);' +
+      '})();';
     
     FBrowser.Browser.MainFrame.ExecuteJavaScript(JavaScriptCode, '', 1);
     
-    // For now, use a fallback approach - set content size detected and use current size
+    // For now, use a simple approach - wait a bit and then proceed
+    // In a more advanced implementation, you could use JavaScript callbacks
+    // to get the actual detected size
+    Sleep(200);
+    
+    // Use improved default sizing based on typical web content
+    if (FBrowserSize.cx < 1000) or (FBrowserSize.cy < 700) then
+    begin
+      FBrowserSize.cx := 1200;
+      FBrowserSize.cy := 900;
+      // Update browser size
+      UpdateSize(FBrowserSize.cx, FBrowserSize.cy);
+    end;
+    
     FContentSizeDetected := True;
     
     // Schedule another processing cycle to generate the output
